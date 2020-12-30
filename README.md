@@ -33,11 +33,11 @@ The example slave server will attempt to connect to a Cascada master server on `
 
 ### How it works
 
-In the following, it is assumed that you read the `README` for the Cascada master server.
+In the following, it is assumed that you have read the `README` for the Cascada master server.
 
 #### Terminology
 
-A Cascada slave server is build around computation nodes. The distant master server can allocate a task for each node. Because of increasingly parallelization-capable hardware, it is often interesting performance-wise to run several computation nodes on the same machine, for instance as threads in the same slave server process.
+A Cascada slave server is built around computation nodes. The distant master server can allocate a task for each node. Because of increasingly parallelization-capable hardware, it is often interesting performance-wise to run several computation nodes on the same machine, for instance as threads in the same slave server process.
 
 However, some tasks are not relevant to the performing of computations, such as authentification, disconnection, etc. They are only done once, while still affecting each node. To make things smoother and more elegant, the nodes are logically grouped in an entity that's refered to as a **master client**, just like related files (the nodes) would belong in the same folder (the master client). Because there is exactly one master client for each slave server process, these terms are used interchanbly.
 
@@ -45,9 +45,9 @@ This entity is mainly reponsible for several tasks:
 - Authentification
 - Asking the server to allocate nodes
 
-The code in the threads doing the computations (which would be the nodes) will be in charge when it comes to fetching new times and submitting its  
+The code in the threads doing the computations (which would be the nodes) will be in charge when it comes to fetching new tasks and submitting its results  
 
-Keep in mind that this only a view of the mind. For instance, if OpenCL is used to offload computations to the GPU, the master client running on the CPU would also have to submit the tasks, and read the new tasks.
+Keep in mind that this only a view of the mind. For instance, if OpenCL is used to offload computations to the GPU, the master client running on the CPU would also have to submit the tasks, and read the new values.
 
 The programmer is rather free to decide how he or she wants to set things up. While this might seem a bit confusing at first, reading the code will make things clearer.
 
@@ -63,9 +63,9 @@ Cruesli uses an intermediate variable context. The programmer only has to regist
 
 In this example, the C variable `a` is bound the Cascada variable `a`, the C variable `b` is bound to the Cascada variable `theB`and the C variable `c` is bound to the Cascada variable `myC`. Notice that the Cascada type corresponding to the C type `uint32_t` is `csc_uint32`. A complete list of types is available in the README of the Cascada master server.
 
-The master server defines the value taken by `theB`. Cruesli loads said value in `b`. The computation node does its computations; the result is stored in `c` and `a`, but the server only needs a value for `myC`. Cruesli knows that the value of `myC` is to be read in `c`, and sends the value of `c`.
+The master server defines the value taken by `theB`. Cruesli loads said value in `b`. The computation node does its computations; the result is stored in `c` and `a`, but the server only needs a value for `myC`. Cruesli knows that the value of `myC` is to be read in `c`, and thus sends the value of `c`.
 
-What's great with this approch is that the programmer does not need to know the precise need of the master server at compile time, but only a set of variable it _might_ need. If the needs of the server were to change (say that the master server wants to read both `a` and `myC`, or only `a`), said needs could (theorically, the server should notify the program of the change and that is currently not implemented) be satisfied immediately, without even having to restart the program !
+What's great with this approch is that the programmer does not need to know the precise need of the master server at compile time, but only a set of variable it _might_ need. If the needs of the server were to change (say that the master server wants to read both `a` and `myC`, or only `a`), said needs could (theorically, the server should notify the program of the change and that is currently not implemented) be satisfied immediately, without even having to restart the program ! In the current state of things, the slave server would have to be restarted, but it wouldn't have to be recompiled. 
 
 
 ### Code
@@ -190,7 +190,7 @@ We then ask the master server to give the node work (`allouer_travail()`). The v
 
 Once the computation is done, `soumettre_travail()` automatically sends the exepcted values to the server.
 
-That's it ! Take a look at `src/client/main.c` to see the complete, functional, example ! The compiled example client is avaible in the `build` directory. If you've not installed the library yet, be sure to add the absolute path to the `cruesli` directory to `LD_LIBRARY_PATH`.
+That's it ! Take a look at `src/client/main.c` to see the complete, functional, example ! The compiled example client is avaible in the `build` directory. If you've not installed the library yet, be sure to add the absolute path of the repo directory to `LD_LIBRARY_PATH`.
 
 
 #### How do I know how to name my Cascada variables ?
