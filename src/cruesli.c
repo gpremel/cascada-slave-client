@@ -18,13 +18,25 @@
 #include "util.h"
 #include "www.h"
 #include "vartable.h"
+#include "varstructs.h"
+#include "entities.h"
+#include "cscerrs.h"
 #include "cruesli.h"
 
-// Global NETwork LOCK pour curl
+// Global NETwork LOCK for curl
 static pthread_mutex_t g_net_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
-csc_master_info init_cruesli(char* url_serveur, char* mdp){
+/*!
+    \brief Initializes cruesli's data structures.
+    
+    \param url_serveur The URL of the Cascada server.
+    \param mdp The password used to connect to the server.
+    \return A csc_master_info struct containing the relevant data.
+*/
+
+
+csc_master_info init_cruesli(const char* url_serveur, const char* mdp){
     CURL* handler = NULL;
     
     char* url_cpy = NULL;
@@ -38,7 +50,7 @@ csc_master_info init_cruesli(char* url_serveur, char* mdp){
     handler = curl_easy_init();
     
     if(!handler){
-        die("Erreur d'initialisation du netcode");
+        die("Netcode initialization error");
     }
     
     csc_master_info info;
@@ -60,7 +72,15 @@ csc_master_info init_cruesli(char* url_serveur, char* mdp){
 }
 
 
-csc_node_info* trouver_noeud_par_id(csc_master_info* info, const char* nodename){
+/*!
+    \brief Searches a node in the local nodes list.
+    
+    \param info Points to the master info struct.
+    \param nodename The name of the node.
+    \return A pointer to the node, or NULL if there is no such node.
+*/
+
+csc_node_info* trouver_noeud_par_id(const csc_master_info* info, const char* nodename){
     
     csc_node_info* noeud = info->nodes;
     
@@ -73,7 +93,12 @@ csc_node_info* trouver_noeud_par_id(csc_master_info* info, const char* nodename)
     return NULL;
 }
 
-
+/*!
+    \brief Cleans up the cruesli data structures (mosty a bunch of frees).
+    \note Should be used AFTER disconnecting from the server.
+    
+    \param info The master info.
+*/
 void cleanup_cruesli(csc_master_info* info){
     free(info->server_base_url);
     free(info->mdp);
@@ -90,27 +115,34 @@ void cleanup_cruesli(csc_master_info* info){
         noeud_courant = suivant;
     }
     
-    curl_easy_cleanup(info->handler);
+    curl_easy_cleanup((CURL*)info->handler);
     
     detruire_liste(info->sch_in);
     detruire_liste(info->sch_out);
 }
 
-
-int connecter_cascada(csc_master_info* info, char* nom_suggere){
-    printf("Connexion au réseau cascada...\n");
-    // On s'authentifie sur le réseau cascada
+/*!
+    \brief Connects to the cascada server.
     
-    int retcode = 0;
+    \param info The master info.
+    \param nom_suggere The suggested name for our slave server, that the master server may or may not follow.
+    \return 0 if everything went well or an error code defined in cruesli.h.
+                    
+*/
+int connecter_cascada(csc_master_info* info, char* nom_suggere){
+    // Authentificating on the cascada network
+    
+    int retcode = CSC_NO_ERROR;
     char url[] = "/api/v1/register-master";
+    char* str = NULL;
     struct curl_slist *headers = NULL;
     www_writestruct writestruct = { .ptr = NULL, .size = 0};
     char* url_complete = strconc(info->server_base_url, url);
     
     
-    curl_easy_setopt(info->handler, CURLOPT_URL, url_complete);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_URL, url_complete);
     
-    /* Là on construit la requête */
+    /* Building the request */
     cJSON* base = cJSON_CreateObject();
     cJSON* json_mdp             = NULL;
     cJSON* json_nom             = NULL;
@@ -147,21 +179,30 @@ int connecter_cascada(csc_master_info* info, char* nom_suggere){
     cJSON_AddItemToObject(base,"name", json_nom);
     
     
-    char* str = cJSON_Print(base);
+    str = cJSON_Print(base);
 
-    // str contient les infos de connexion, maintenant il n'y a plus qu'à envoyer la sauce
+    // str contains the connection info; we're all set now
     headers = curl_slist_append(headers, "Expect:");
     headers = curl_slist_append(headers, "Content-Type: application/json");
-    curl_easy_setopt(info->handler, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_HTTPHEADER, headers);
     
-    curl_easy_setopt(info->handler, CURLOPT_POSTFIELDS, str);
-    curl_easy_setopt(info->handler, CURLOPT_POSTFIELDSIZE, -1L);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_POSTFIELDS, str);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_POSTFIELDSIZE, -1L);
     
-    curl_easy_setopt(info->handler, CURLOPT_WRITEFUNCTION, dl2string);
-    curl_easy_setopt(info->handler, CURLOPT_WRITEDATA, &writestruct);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_WRITEFUNCTION, dl2string);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_WRITEDATA, &writestruct);
+
     
-    curl_easy_perform(info->handler);
+    CURLcode res = curl_easy_perform((CURL*)(info->handler));
     
+
+    curl_slist_free_all(headers);
+    
+    if(res != CURLE_OK){
+        retcode = CSC_FATAL_CURL_ERROR;
+        goto end;
+    }
+
     reponse = cJSON_Parse(writestruct.ptr);
 
     
@@ -196,8 +237,8 @@ int connecter_cascada(csc_master_info* info, char* nom_suggere){
     }
     
     
-    /* Ce sont des propriétés non-critiques donc si on ne les a pas c'est pas grave,
-     on continue quand même */
+     /* The following are non-critical properties; even if they can't be extracted, 
+     we carry on*/
     json_projet_nom = cJSON_GetObjectItemCaseSensitive(json_projet, "name");
     if(!cJSON_IsString(json_projet_nom)){
         retcode = CSC_ERR_NONFATAL_MISSINGINFO;
@@ -228,7 +269,8 @@ int connecter_cascada(csc_master_info* info, char* nom_suggere){
     
     {
         cJSON* var;
-        // On itère sur le schéma d'entrée...
+        // Iterating over the input scheme scheme
+        // generated by the server
         cJSON_ArrayForEach(var, json_projet_sch_in){
             if(!cJSON_IsNumber(var) || !var->string){
                 retcode = CSC_ERR_FATAL_MISSINGINFO;
@@ -237,7 +279,8 @@ int connecter_cascada(csc_master_info* info, char* nom_suggere){
             ajouter_variable(var->valueint, var->string, NULL, info->sch_in);
         }
         
-        // On itère ensuite sur le schéma de sortie
+        // Iterating over the output scheme
+        // that we're going to have to compute
         cJSON_ArrayForEach(var, json_projet_sch_out){
             if(!cJSON_IsNumber(var) || !var->string){
                 retcode = CSC_ERR_FATAL_MISSINGINFO;
@@ -250,23 +293,30 @@ int connecter_cascada(csc_master_info* info, char* nom_suggere){
     
 
 end2:
-    /* On a pas besoin de faire un cJSON_Delete sur les
-     schéma car ils appartienent à reponse */
+     /* No need to perform a cJSON_Delete on the
+     schemes because they belong to reponse */
     cJSON_Delete(reponse);
-    free(str);
-    free(url_complete);
     free(writestruct.ptr);
 
     
 end:
     cJSON_Delete(base);
+    cJSON_free(str);
+    free(url_complete);
     
     return retcode;
 }
 
+/*!
+    \brief Disconnects from the cascada server.
+    
+    \param info The master info.
+    \return 0 if everything went well or an error code defined in cruesli.h.
+                    
+*/
 int deconnecter_cascada(csc_master_info* info){
     
-    int retcode = 0;
+    int retcode = CSC_NO_ERROR;
     char url[] = "/api/v1/unregister-master";
     
     struct curl_slist *headers = NULL;
@@ -275,16 +325,10 @@ int deconnecter_cascada(csc_master_info* info){
     char* url_complete = strconc(info->server_base_url, url);
     char* str = NULL;
     
-    curl_easy_setopt(info->handler, CURLOPT_URL, url_complete);
-    headers = curl_slist_append(headers, "Expect:");
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    curl_easy_setopt(info->handler, CURLOPT_HTTPHEADER, headers);
-
-    
     cJSON* reponse = NULL;
     cJSON* json_code_statut = NULL;
     
-    /* Là on construit la requête */
+    /* Building the request */
     cJSON* base = cJSON_CreateObject();
     if(!base){
         goto end;
@@ -297,13 +341,30 @@ int deconnecter_cascada(csc_master_info* info){
     
     str = cJSON_Print(base);
     
-    curl_easy_setopt(info->handler, CURLOPT_POSTFIELDS, str);
-    curl_easy_setopt(info->handler, CURLOPT_POSTFIELDSIZE, -1L);
+    pthread_mutex_lock(&g_net_lock);
+
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_URL, url_complete);
+    headers = curl_slist_append(headers, "Expect:");
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_HTTPHEADER, headers);
+
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_POSTFIELDS, str);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_POSTFIELDSIZE, -1L);
     
-    curl_easy_setopt(info->handler, CURLOPT_WRITEFUNCTION, dl2string);
-    curl_easy_setopt(info->handler, CURLOPT_WRITEDATA, &writestruct);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_WRITEFUNCTION, dl2string);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_WRITEDATA, &writestruct);
     
-    curl_easy_perform(info->handler);
+    CURLcode res = curl_easy_perform((CURL*)info->handler);
+
+    curl_slist_free_all(headers);
+
+    pthread_mutex_unlock(&g_net_lock);
+
+
+    if(res != CURLE_OK){
+        retcode = CSC_FATAL_CURL_ERROR;
+        goto end;
+    }
     
     reponse = cJSON_Parse(writestruct.ptr);
     
@@ -328,9 +389,19 @@ end:
     return retcode;
 }
 
+/*!
+    \brief Asks the master server to allocate nodes for us.
+    
+    \note No task will be allocated for the nodes.
+    \note The server will allocate AT MOST nb_noeuds.
 
+    \param info The master info.
+    \param nb_noeuds The number of nodes that should be allocated.
+    \return 0 if everything went well or an error code defined in cruesli.h.
+                    
+*/
 int allouer_noeuds(csc_master_info* info, size_t nb_noeuds){
-    int retcode = 0;
+    int retcode = CSC_NO_ERROR;
     char url[] = "/api/v1/register-nodes";
     
     struct curl_slist *headers = NULL;
@@ -338,19 +409,14 @@ int allouer_noeuds(csc_master_info* info, size_t nb_noeuds){
     
     char* url_complete = strconc(info->server_base_url, url);
     char* str = NULL;
-    
-    curl_easy_setopt(info->handler, CURLOPT_URL, url_complete);
-    headers = curl_slist_append(headers, "Expect:");
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    curl_easy_setopt(info->handler, CURLOPT_HTTPHEADER, headers);
-    
+        
     
     cJSON* reponse = NULL;
     cJSON* json_code_statut = NULL;
     cJSON* json_liste_id_noeuds = NULL;
     cJSON* json_id_noeud_courant = NULL;
     
-    /* Là on construit la requête */
+    /* Building the request */
     cJSON* base = cJSON_CreateObject();
     if(!base){
         retcode = CSC_ERR_FATAL_JSON_INTERNAL;
@@ -372,15 +438,30 @@ int allouer_noeuds(csc_master_info* info, size_t nb_noeuds){
 
     str = cJSON_Print(base);
     
+    pthread_mutex_lock(&g_net_lock);
     
-    curl_easy_setopt(info->handler, CURLOPT_POSTFIELDS, str);
-    curl_easy_setopt(info->handler, CURLOPT_POSTFIELDSIZE, -1L);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_URL, url_complete);
+    headers = curl_slist_append(headers, "Expect:");
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_HTTPHEADER, headers);
+
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_POSTFIELDS, str);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_POSTFIELDSIZE, -1L);
     
-    curl_easy_setopt(info->handler, CURLOPT_WRITEFUNCTION, dl2string);
-    curl_easy_setopt(info->handler, CURLOPT_WRITEDATA, &writestruct);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_WRITEFUNCTION, dl2string);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_WRITEDATA, &writestruct);
     
-    curl_easy_perform(info->handler);
-    
+    CURLcode res = curl_easy_perform((CURL*)info->handler);
+
+    curl_slist_free_all(headers);
+
+    pthread_mutex_unlock(&g_net_lock);
+
+    if(res != CURLE_OK){
+        retcode = CSC_FATAL_CURL_ERROR;
+        goto end;
+    }
+
     reponse = cJSON_Parse(writestruct.ptr);
     
     json_code_statut = cJSON_GetObjectItemCaseSensitive(reponse, "code");
@@ -440,7 +521,14 @@ end:
     return retcode;
 }
 
-
+/*!
+    \brief Asks the master server to allocate a task for the node mon_noeud.
+    
+    \param info The master info.
+    \param mon_noeud The node that needs to be allocated work.
+    \return 0 if everything went well or an error code defined in cruesli.h.
+                    
+*/
 int allouer_travail(csc_master_info* info, csc_node_info* mon_noeud){
     
     //csc_node_info* mon_noeud = trouver_noeud_par_id(info, id_noeud);
@@ -449,7 +537,7 @@ int allouer_travail(csc_master_info* info, csc_node_info* mon_noeud){
     if(!mon_noeud || !info)
         return CSC_FATAL_NULL_INFO;
 
-    int retcode = 0;
+    int retcode = CSC_NO_ERROR;
     char url[] = "/api/v1/fetch-work-for-node";
     
     struct curl_slist *headers = NULL;
@@ -490,22 +578,28 @@ int allouer_travail(csc_master_info* info, csc_node_info* mon_noeud){
     
     pthread_mutex_lock(&g_net_lock);
     
-    curl_easy_setopt(info->handler, CURLOPT_URL, url_complete);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_URL, url_complete);
     headers = curl_slist_append(headers, "Expect:");
     headers = curl_slist_append(headers, "Content-Type: application/json");
-    curl_easy_setopt(info->handler, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_HTTPHEADER, headers);
 
     
-    curl_easy_setopt(info->handler, CURLOPT_POSTFIELDS, str);
-    curl_easy_setopt(info->handler, CURLOPT_POSTFIELDSIZE, -1L);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_POSTFIELDS, str);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_POSTFIELDSIZE, -1L);
     
-    curl_easy_setopt(info->handler, CURLOPT_WRITEFUNCTION, dl2string);
-    curl_easy_setopt(info->handler, CURLOPT_WRITEDATA, &writestruct);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_WRITEFUNCTION, dl2string);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_WRITEDATA, &writestruct);
     
-    curl_easy_perform(info->handler);
+    CURLcode res = curl_easy_perform((CURL*)info->handler);
     
+    curl_slist_free_all(headers);
+
     pthread_mutex_unlock(&g_net_lock);
 
+    if(res != CURLE_OK){
+        retcode = CSC_FATAL_CURL_ERROR;
+        goto end;
+    }
     
     reponse = cJSON_Parse(writestruct.ptr);
     
@@ -515,7 +609,7 @@ int allouer_travail(csc_master_info* info, csc_node_info* mon_noeud){
         goto end2;
     }
     retcode = json_code_statut->valueint;
-    if(retcode != 0){
+    if(retcode != CSC_NO_ERROR){
         goto end2;
     }
     
@@ -592,6 +686,14 @@ end:
 }
 
 
+/*!
+    \brief Submits the result of mon_noeud's work.
+    
+    \param info The master info.
+    \param mon_noeud The node which work should be submitted.
+    \return 0 if everything went well or an error code defined in cruesli.h.
+                    
+*/
 int soumettre_travail(csc_master_info* info, csc_node_info* mon_noeud){
     
     //csc_node_info* mon_noeud = trouver_noeud_par_id(info, id_noeud);
@@ -600,7 +702,7 @@ int soumettre_travail(csc_master_info* info, csc_node_info* mon_noeud){
         return CSC_FATAL_NULL_INFO;
     
     
-    int retcode = 0;
+    int retcode = CSC_NO_ERROR;
     char url[] = "/api/v1/submit-results";
     
     struct curl_slist *headers = NULL;
@@ -642,7 +744,7 @@ int soumettre_travail(csc_master_info* info, csc_node_info* mon_noeud){
         goto end;
     }
     
-    // On commence par recopier le schéma d'entrée
+    // We start by copying the input scheme
     {
         csc_var_list* var_iter_cour = info->sch_in;
         csc_var* var_local     = NULL;
@@ -650,7 +752,7 @@ int soumettre_travail(csc_master_info* info, csc_node_info* mon_noeud){
         while(var_iter_cour){
             if(var_iter_cour->local){
                 var_local = recup_variable(var_iter_cour->local->name, mon_noeud->localvars);
-                // La variable locale exigée n'existe pas...
+                // The requested local variable does not exist...
                 if(!var_local){
                     retcode = CSC_ERR_FATAL_UNREGISTERED_VAR;
                     goto end;
@@ -662,11 +764,12 @@ int soumettre_travail(csc_master_info* info, csc_node_info* mon_noeud){
             var_iter_cour = var_iter_cour->next;
         }
         
+        // And then the output scheme
         var_iter_cour = info->sch_out;
         while(var_iter_cour){
             if(var_iter_cour->local){
                 var_local = recup_variable(var_iter_cour->local->name, mon_noeud->localvars);
-                // La variable locale exigée n'existe pas...
+                // The requested local variable does not exist...
                 if(!var_local){
                     retcode = CSC_ERR_FATAL_UNREGISTERED_VAR;
                     goto end;
@@ -684,22 +787,29 @@ int soumettre_travail(csc_master_info* info, csc_node_info* mon_noeud){
     
     pthread_mutex_lock(&g_net_lock);
     
-    curl_easy_setopt(info->handler, CURLOPT_URL, url_complete);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_URL, url_complete);
     headers = curl_slist_append(headers, "Expect:");
     headers = curl_slist_append(headers, "Content-Type: application/json");
-    curl_easy_setopt(info->handler, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_HTTPHEADER, headers);
     
-    curl_easy_setopt(info->handler, CURLOPT_POSTFIELDS, str);
-    curl_easy_setopt(info->handler, CURLOPT_POSTFIELDSIZE, -1L);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_POSTFIELDS, str);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_POSTFIELDSIZE, -1L);
     
-    curl_easy_setopt(info->handler, CURLOPT_WRITEFUNCTION, dl2string);
-    curl_easy_setopt(info->handler, CURLOPT_WRITEDATA, &writestruct);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_WRITEFUNCTION, dl2string);
+    curl_easy_setopt((CURL*)info->handler, CURLOPT_WRITEDATA, &writestruct);
     
-    curl_easy_perform(info->handler);
+    CURLcode res = curl_easy_perform((CURL*)info->handler);
     
+    curl_slist_free_all(headers);
+
     pthread_mutex_unlock(&g_net_lock);
 
+    if(res != CURLE_OK){
+        retcode = CSC_FATAL_CURL_ERROR;
+        goto end;
+    }
     
+
     reponse = cJSON_Parse(writestruct.ptr);
     
     json_code_statut = cJSON_GetObjectItemCaseSensitive(reponse, "code");

@@ -9,8 +9,6 @@
 #ifndef util_h
 #define util_h
 
-#include <stdio.h>
-
 char* strconc(char* str1, char* str2);
 
 

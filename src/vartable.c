@@ -6,13 +6,25 @@
 //  Copyright © 2020 Guillaume Prémel. All rights reserved.
 //
 
+/*!
+    Defines several useful functions for manipulating the Cascada variables and variables lists.
+*/
+
 
 #include <string.h>
 #include <inttypes.h>
 
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
+
+
 #include "util.h"
 #include "safe_malloc.h"
 #include "vartable.h"
+#include "varstructs.h"
 
 
 #define CMP_NOMATCH 0
@@ -21,7 +33,15 @@
 #define CMP_NAME_TYPE_VALUE_MATCH 3
 
 
-int cmp_var_noval(csc_var* v1, csc_var* v2);
+int cmp_var_noval(const csc_var* v1, const csc_var* v2);
+
+
+
+/*!
+    \brief Creates a new variable list.
+    
+    \return A pointer to a new, empty, list                
+*/
 
 csc_var_list* nouvelle_liste(void){
     csc_var_list* liste=safe_malloc(sizeof(csc_var_list));
@@ -31,8 +51,17 @@ csc_var_list* nouvelle_liste(void){
     return liste;
 }
 
-
-int cmp_var_noval(csc_var* v1, csc_var* v2){
+/*!
+    \brief Safely compares two pointers to cascada variables.
+    
+    \param v1 A pointer to the first variable
+    \param v2 A pointer to the second variable
+    \return - CMP_NAME_TYPE_MATCH if both the names and the types match
+            - CMP_NAME_MATCH if only the names match
+            - CMP_NOMATCH if nothing matches
+                    
+*/
+int cmp_var_noval(const csc_var* v1, const csc_var* v2){
     
     if(!strcmp(v1->name, v2->name)){
         if(v1->type == v2->type){
@@ -47,10 +76,30 @@ int cmp_var_noval(csc_var* v1, csc_var* v2){
 }
 
 
+/*!
+    \brief Adds a variable named nom, having type type, pointed to by ptr, to the variable list list.
+    
+    \param type The cascada type of the variable, can be
+                - VARTYPE_U8 
+                - VARTYPE_U32
+                - VARTYPE_U64    
+                - VARTYPE_FLOAT 
+                - VARTYPE_DOUBLE  
+                - VARTYPE_I32 
+                - VARTYPE_I64
 
+    \param nom The name of the variable. Should match the name provided in the scheme sent by the master server.
+    \param ptr The adress of the underlying C variable.
+    \param list A pointer to the list of variables that the new variable should be added to.
+    \return true if the variable was successfully added, false if not.
+
+    \note If a variable with the same name already exists, its value WILL NOT BE UPDATED; nothing will happen.            
+    \note The name parameter has nothing to do with the name of the underlying C variable.
+    \note The name of the variable is copied, and therefore ownership of the array nom is NOT shared.
+*/
 bool ajouter_variable(csc_var_type type, char* nom, void* ptr, csc_var_list* list){
 
-    // On ne peut rien faire sur un pointeur NULL
+    // Can't do anything with a NULL pointer
     if(list == NULL){
         return false;
     }
@@ -72,7 +121,7 @@ bool ajouter_variable(csc_var_type type, char* nom, void* ptr, csc_var_list* lis
         {
             res_cmp = cmp_var_noval(myvar, list->local);
             if(res_cmp != CMP_NOMATCH){
-                // On a trouvé la variable, qui existe donc déjà...
+                // We found the variable, which therefore does already exist
                 free(myvar->name);
                 free(myvar);
                 return false;
@@ -87,15 +136,16 @@ bool ajouter_variable(csc_var_type type, char* nom, void* ptr, csc_var_list* lis
         
     }
     
-    // On est arrivé au bout de la liste sans encombre;
-    // On peut donc rajouter myvar à la liste
+    // We made it to the end of the list without issue
+    // We can therefore add myvar to the list
     
-    // Soit on a trouvé un trou dans la liste
+    // Either we found a hole in the list
     if(premier_null != NULL){
         premier_null->local = myvar;
     } else {
-        // On doit allouer un nouveau maillon de la chaîne, que l'on va ranger dans
-        // prec->next
+
+        // Or we didn't, and we have to allocate a new link in the linked list
+        // That we'll store in prec->next
         prec->next = safe_malloc(sizeof(csc_var_list));
         prec->next->local = myvar;
         prec->next->next  = NULL;
@@ -104,7 +154,13 @@ bool ajouter_variable(csc_var_type type, char* nom, void* ptr, csc_var_list* lis
     return true;
 }
 
-
+/*!
+    \brief Fetches the variable named nom from the variable list.
+    
+    \param nom The name of the variable.
+    \param list A pointer to the list of variables that will be searched.
+    \return A pointer to the variable if it does exist in the list; NULL if not
+*/
 csc_var* recup_variable(char* nom, csc_var_list* list){
     while(list != NULL){
         if(list->local != NULL){
@@ -117,6 +173,12 @@ csc_var* recup_variable(char* nom, csc_var_list* list){
     return NULL;
 }
 
+
+/*!
+    \brief Destroys the variable list liste.
+    
+    \param liste A pointer to the list of variable that should be disposed of.
+*/
 
 void detruire_liste(csc_var_list* liste){
     csc_var_list* suivant = NULL;
@@ -133,14 +195,18 @@ void detruire_liste(csc_var_list* liste){
     
 }
 
-
+/*!
+    \brief Prints the content and type of the cascada variable myvar.
+    
+    \param myvar A pointer to the vairable that should be printed.
+*/
 void afficher_variable(csc_var* myvar){
     
     if(myvar == NULL){
         return;
     }
     
-    // Cas où l'on a enregistré une variable sans valeur
+    // Registered a variable without its value
     if(!myvar->value){
         printf("%s: None", myvar->name);
         return;
@@ -182,6 +248,11 @@ void afficher_variable(csc_var* myvar){
     }
 }
 
+/*!
+    \brief Prints the content and type of the cascada variable list liste.
+    
+    \param liste A pointer to the cascada variable list that should be printed.
+*/
 void afficher_liste(csc_var_list* liste){
     while(liste){
         afficher_variable(liste->local);
@@ -191,11 +262,20 @@ void afficher_liste(csc_var_list* liste){
 }
 
 
+/*!
+    \brief Fills in the values of the variables of list with the values of the corresponding variables of src.
+    
+    \param list A pointer to the cascada variable list that should be completed.
+    \param src  A pointer to the cascada variable list that should be used to complete list.
+    \return 0 if everything went fine and an error code if not.
 
+    \warning All the variables of list must exist in src. 
+*/
 int calquer_liste(csc_var_list* list, csc_var_list* src){
-    // Pour chaque valeur de list, on regarde si elle est dans src;
-    // si c'est le cas, on change la valeur de l'élément de liste pour
-    // le faire coincider avec l'élément de src correspondant
+
+    // For each value of list, we check if it is in src.
+    // If it's the case, we change the value of the element to
+    // have it equal to the corresponding element of src
     
     csc_var_list* orig_src = src;
     
@@ -207,7 +287,7 @@ int calquer_liste(csc_var_list* list, csc_var_list* src){
         if(list->local){
             while(src){
                 if(src->local && !strcmp(src->local->name, list->local->name)){
-                    /* Type compatible ? */
+                    // Compatible type ? 
                     if(src->local->type == list->local->type)
                         list->local->value = src->local->value;
                     else
@@ -228,7 +308,14 @@ int calquer_liste(csc_var_list* list, csc_var_list* src){
 }
 
 
+/*!
+    \brief Casts the cascada variable var to a double.
+    
+    \param var  A pointer to the cascada variable that should be cast.
+    \return The value of the variable casted as a double.
 
+    \note If the variable can't be cast because its type is unknown (which should not happen), the function returns 0.0.
+*/
 double var2double(csc_var* var){
     switch (var->type) {
         case VARTYPE_U8:

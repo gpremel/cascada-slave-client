@@ -9,21 +9,25 @@
 #include <stdio.h>
 #include <math.h>
 #include <unistd.h>
+#include <stdlib.h>
+#include <time.h>
+#include <limits.h>
 
 #include <pthread.h>
 
+#include <cruesli/cruesli.h>
+
 #include "safe_malloc.h"
-#include "vartable.h"
-#include "cruesli.h"
 
-#define NB_TH 10
 
-struct csc_th_spawn_info {
+#define NB_TH 8
+
+
+typedef struct csc_th_spawn_info {
     csc_node_info* nodeinfo;
     csc_master_info* masterinfo;
     pthread_t threadid;
-};
-typedef struct csc_th_spawn_info csc_th_spawn_info;
+} csc_th_spawn_info;
 
 void th_calcul(csc_th_spawn_info* inf);
 
@@ -33,19 +37,48 @@ int main(int argc, const char * argv[]) {
     gethostname(hostname, _POSIX_HOST_NAME_MAX);
     
     csc_master_info info;
-    info = init_cruesli("127.0.0.1:8088", "ABRACADABRA");
-    connecter_cascada(&info, hostname);
-    allouer_noeuds(&info, NB_TH);
+
+    const char* master_server_address = "127.0.0.1:8088";
+    const char* master_server_pwd = "ABRACADABRA";
+
+    if(argc > 1)
+        master_server_address = argv[1];
+    if(argc > 2)
+        master_server_pwd = argv[2];
+    if(argc > 3){
+        fprintf(stderr, "usage: %s <address>:<port> <password>\n"
+                "\t - address:port defaults to 127.0.0.1:8088\n"
+                "\t\tif the port is left unspecified, it defaults to 80\n"
+                "\t - password defaults to ABRACADABRA\n", argv[0]);
+        exit(1);
+    }
     
-    printf("Je m'appelle %s (code %s)\n", info.nom, info.authcode);
-    printf("Je bosse sur le projet %s avec l'algorithme %s\n", info.nom_projet, info.algo);
-    printf("Schéma d'entrée:\n");
-    afficher_liste(info.sch_in);
-    printf("Schéma de sortie:\n");
-    afficher_liste(info.sch_out);
+    printf("Connecting to the cascada master server at %s...\n", master_server_address);
+
+    info = init_cruesli(master_server_address, master_server_pwd);
+    int res = connecter_cascada(&info, hostname);
+    if(res != CSC_NO_ERROR){
+        fprintf(stderr, "An error happenned during connection\n");
+        exit(2);
+    }
+
+    res = allouer_noeuds(&info, NB_TH);
+    if(res != CSC_NO_ERROR){
+        fprintf(stderr, "An error happenned during node allocation\n");
+        exit(2);
+    }
+
+
+
+    printf("My name is %s (code %s)\n", info.nom, info.authcode);
+    printf("I work on the project %s with the algorithm %s\n", info.nom_projet, info.algo);
+    //printf("Input scheme:\n");
+    //afficher_liste(info.sch_in);
+    //printf("Output scheme:\n");
+    //afficher_liste(info.sch_out);
     
     /*** SPAWN ***/
-    printf("Je vais maitenant spawner les threads...\n");
+    printf("I will now spawn the %d threads...\n", NB_TH);
     
     csc_th_spawn_info** th_info_list = safe_malloc(sizeof(csc_th_spawn_info*)*NB_TH);
     csc_node_info* spawner = info.nodes;
@@ -86,25 +119,25 @@ void th_calcul(csc_th_spawn_info* inf){
     
     int code = 0;
     
-    printf("Thread spawné avec succès !\n");
+    printf("Thread succesfully spawned !\n");
     
     ajouter_variable(VARTYPE_FLOAT, "X", &X, monnoeud->localvars);
     ajouter_variable(VARTYPE_FLOAT, "Y", &Y, monnoeud->localvars);
     ajouter_variable(VARTYPE_FLOAT, "Z", &Z, monnoeud->localvars);
-    ajouter_variable(VARTYPE_FLOAT, "d", &d, monnoeud->localvars);
+    ajouter_variable(VARTYPE_FLOAT, "mE", &d, monnoeud->localvars);
 
     while(!code){
         code = allouer_travail(masterinfo, monnoeud);
         if(!code){
-            d = (-1)*sqrtf(X*X + Y*Y + Z*Z);
+            d = (-1)*(sqrtf(X*X + Y*Y + Z*Z)+1);
             code = soumettre_travail(masterinfo, monnoeud);
             if(code)
-                printf("Envoi raté !\n");
+                printf("Submission failed !\n");
         } else {
             if(code == 7)
-                printf("Plus de boulot \\°_°\\ \n");
+                printf("No more work \\°_°\\ \n");
             else
-                printf("Allocation ratée !\n");
+                printf("Couldn't allocate work ! (nothing to do with malloc...)\n");
         }
         
     }
